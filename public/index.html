@@ -22,6 +22,11 @@
         <p>Name: {{.Name}}</p>
         <p>Email: {{.Email}}</p>
         <p>Message: {{.Message}}</p>
+{{/*        <input type="submit" value="削除">*/}}
+        <form action="" method="post">
+            <input type="hidden" name="id" value={{.Id}}>
+            <button type="submit" name="_method" value="DELETE">削除</button>
+        </form>
         <hr>
     {{end}}
 </section>

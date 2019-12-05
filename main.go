@@ -45,7 +45,8 @@ func staticHandler(w http.ResponseWriter, r *http.Request) {
 	db := dbConnect()
 	defer db.Close()
 
-	if r.Method == http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
 		result, err := db.Query("select * from boards")
 		if err != nil {
 			log.Fatal(err)
@@ -64,16 +65,29 @@ func staticHandler(w http.ResponseWriter, r *http.Request) {
 		tmpl := template.Must(template.ParseFiles("public/index.html"))
 		tmpl.Execute(w, users)
 		log.Printf("%+v¥n", r)
-	} else if r.Method == http.MethodPost {
-		name := r.FormValue(("name"))
-		email := r.FormValue("email")
-		message := r.FormValue("message")
-		insert, err := db.Prepare("insert into boards(name, email, message) values (?,?,?)")
-		if err != nil {
-			log.Fatal(err)
+	case http.MethodPost:
+		method := r.PostFormValue("_method")
+		if method == "DELETE" {
+			id := r.PostFormValue("id")
+			delete, err := db.Prepare("delete from boards where id = ?")
+			if err != nil {
+				log.Fatal(err)
+			}
+			delete.Exec(id)
+		} else { //post
+			name := r.FormValue(("name"))
+			email := r.FormValue("email")
+			message := r.FormValue("message")
+			insert, err := db.Prepare("insert into boards(name, email, message) values (?,?,?)")
+			if err != nil {
+				log.Fatal(err)
+			}
+			insert.Exec(name, email, message)
 		}
-		insert.Exec(name, email, message)
 
 		http.Redirect(w, r, "/index", http.StatusFound)
+	default:
+		fmt.Fprint(w, "Method not allowed.\n")
 	}
+
 }
