@@ -10,7 +10,6 @@
     <h2>新規投稿</h2>
     <form action="" method="post">
         名前: <input type="text" name="name" value=""><br>
-        メール: <input type="email" name="email" value=""><br>
         本文: <input type="text" name="message" value=""><br>
         <input type="submit" value="投稿">
     </form>
@@ -20,7 +19,6 @@
     <hr>
     {{range .}}
         <p>Name: {{.Name}}</p>
-        <p>Email: {{.Email}}</p>
         <p>Message: {{.Message}}</p>
         <form action="" method="post">
             <input type="hidden" name="id" value={{.Id}}>

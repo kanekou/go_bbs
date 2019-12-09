@@ -14,7 +14,6 @@ import (
 type Board struct {
 	Id      int
 	Name    string
-	Email   string
 	Message string
 }
 
@@ -92,7 +91,7 @@ func staticHandler(w http.ResponseWriter, r *http.Request) {
 		boards := make([]Board, 0)
 		for result.Next() {
 			var board Board
-			if err := result.Scan(&board.Id, &board.Name, &board.Email, &board.Message); err != nil {
+			if err := result.Scan(&board.Id, &board.Name, &board.Message); err != nil {
 				log.Println(err)
 			}
 			boards = append(boards, board)
@@ -112,13 +111,12 @@ func staticHandler(w http.ResponseWriter, r *http.Request) {
 			delete.Exec(id)
 		} else { //post
 			name := r.FormValue(("name"))
-			email := r.FormValue("email")
 			message := r.FormValue("message")
-			insert, err := db.Prepare("insert into boards(name, email, message) values (?,?,?)")
+			insert, err := db.Prepare("insert into boards(name,  message) values (?,?)")
 			if err != nil {
 				log.Println(err)
 			}
-			insert.Exec(name, email, message)
+			insert.Exec(name, message)
 		}
 
 		http.Redirect(w, r, "/index", http.StatusFound)
