@@ -19,6 +19,7 @@ type Board struct {
 
 type User struct {
 	Id       int
+	Name     string
 	Email    string
 	Password string
 }
@@ -30,6 +31,7 @@ func main() {
 	}
 
 	http.HandleFunc("/login", loginHandler)
+	http.HandleFunc("/signup", signupHandler)
 	http.HandleFunc("/index", staticHandler)
 	s := &http.Server{
 		Addr: ":9000",
@@ -50,7 +52,6 @@ func dbConnect() (db *sql.DB) {
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		fmt.Println("login page")
 		tmpl := template.Must(template.ParseFiles("public/login.html"))
 		tmpl.Execute(w, nil)
 	case http.MethodPost:
@@ -63,16 +64,43 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		err := db.QueryRow("select id from users where email = ? and password = ?", email, pw).Scan(&id)
 		if err == sql.ErrNoRows { // Empty set
 			log.Println(err)
-			log.Println("userid, 又はemailが違います")
 			http.Redirect(w, r, "/login", http.StatusFound)
 		}
 		fmt.Println(id)
-		//TODO: sessionに載せる
-
+		http.Redirect(w, r, "/index", http.StatusFound)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed) // 405
 		w.Write([]byte("Method not allowed"))
 		http.Redirect(w, r, "/index", http.StatusFound)
+	}
+}
+
+func signupHandler(w http.ResponseWriter, r *http.Request) {
+	db := dbConnect()
+	defer db.Close()
+
+	switch r.Method {
+	case http.MethodGet:
+		tmpl := template.Must(template.ParseFiles("public/signup.html"))
+		tmpl.Execute(w, nil)
+	case http.MethodPost:
+		name := r.FormValue("name")
+		email := r.FormValue("email")
+		pw := r.FormValue("password")
+
+		db := dbConnect()
+		defer db.Close()
+		insert, err := db.Prepare("insert into users(name, email, password) values (?,?,?)")
+		if err != nil {
+			log.Println(err)
+		}
+		insert.Exec(name, email, pw)
+
+		http.Redirect(w, r, "/index", http.StatusFound)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed) // 405
+		w.Write([]byte("Method not allowed"))
+		http.Redirect(w, r, "/signup", http.StatusFound)
 	}
 }
 
@@ -110,7 +138,7 @@ func staticHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			delete.Exec(id)
 		} else { //post
-			name := r.FormValue(("name"))
+			name := r.FormValue(("nickname"))
 			message := r.FormValue("message")
 			insert, err := db.Prepare("insert into boards(name,  message) values (?,?)")
 			if err != nil {
