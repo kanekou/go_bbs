@@ -48,38 +48,13 @@ func dbConnect() (db *sql.DB) {
 	return db
 }
 
-//func checkAuth(r *http.Request) bool {
-//	user, pw, ok := r.BasicAuth()
-//	if !ok || user != autuUser || pw != authPw {
-//		return false
-//	}
-//	return true
-//}
-//
-//func basicAuthHandler(w http.ResponseWriter, r *http.Request) {
-//	if checkAuth(r) == false {
-//		w.Header().Add("WWW.Authenticate", `Basic realm="my private area"`)
-//		w.WriteHeader(http.StatusUnauthorized)
-//		w.Write([]byte("401 Not Authenticate"))
-//		return
-//	}
-//
-//	tmpl := template.Must(template.ParseFiles("public/login.html"))
-//	tmpl.Execute(w, )
-//}
-
-//func Secret(user, realm string) string {
-//	db := dbConnect()
-//	defer db.Close()
-//	login, err := db.Prepare("select * from users where email = ? and password = ?")
-//	if err != nil {
-//		log.Println(err)
-//	}
-//	login.Exec(user, email)
-//}
-
 func loginHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost { // FIX: リファクタ
+	switch r.Method {
+	case http.MethodGet:
+		fmt.Println("login page")
+		tmpl := template.Must(template.ParseFiles("public/login.html"))
+		tmpl.Execute(w, nil)
+	case http.MethodPost:
 		var id string
 		email := r.FormValue("email")
 		pw := r.FormValue("password")
@@ -93,14 +68,9 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/login", http.StatusFound)
 		}
 		fmt.Println(id)
-		fmt.Println("エラーじゃない")
-	} else if r.Method == http.MethodGet { // get
-		fmt.Println("login page")
-		tmpl := template.Must(template.ParseFiles("public/login.html"))
-		tmpl.Execute(w, nil)
-		//http.Handle("/login", http.StripPrefix("/public/", http.FileServer(http.Dir("public/login.html"))))
-		//http.FileServer(http.Dir("public/login.html"))
-	} else {
+		//TODO: sessionに載せる
+
+	default:
 		w.WriteHeader(http.StatusMethodNotAllowed) // 405
 		w.Write([]byte("Method not allowed"))
 		http.Redirect(w, r, "/index", http.StatusFound)
