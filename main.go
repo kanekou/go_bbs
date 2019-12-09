@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"github.com/go-delve/delve/service/api"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
 	"html/template"
@@ -12,17 +11,23 @@ import (
 	"os"
 )
 
-type User struct {
+type Board struct {
 	Id      int
 	Name    string
 	Email   string
 	Message string
 }
 
+type User struct {
+	Id       int
+	Email    string
+	Password string
+}
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		log.Println("Error loading .env file")
 	}
 
 	http.HandleFunc("/login", loginHandler)
@@ -38,7 +43,7 @@ func main() {
 func dbConnect() (db *sql.DB) {
 	db, err := sql.Open("mysql", "root:"+os.Getenv("DB_PASSWORD")+"@tcp(127.0.0.1:3306)/bbs")
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
 	return db
 }
@@ -68,28 +73,37 @@ func dbConnect() (db *sql.DB) {
 //	defer db.Close()
 //	login, err := db.Prepare("select * from users where email = ? and password = ?")
 //	if err != nil {
-//		log.Fatal(err)
+//		log.Println(err)
 //	}
 //	login.Exec(user, email)
 //}
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		http.FileServer(http.Dir("public/login.html"))
-	case http.MethodPost:
-		//TODO: email, pw をparamsから持ってくる
+	if r.Method == http.MethodPost { // FIX: リファクタ
+		var id string
+		email := r.FormValue("email")
+		pw := r.FormValue("password")
+
 		db := dbConnect()
 		defer db.Close()
-		login, err := db.Prepare("select * from users where email = ? and password = ?")
-		if err != nil {
-			log.Fatal(err)
+		err := db.QueryRow("select id from users where email = ? and password = ?", email, pw).Scan(&id)
+		if err == sql.ErrNoRows { // Empty set
+			log.Println(err)
+			log.Println("userid, 又はemailが違います")
 			http.Redirect(w, r, "/login", http.StatusFound)
 		}
-		login.Exec(email, pw)
+		fmt.Println(id)
+		fmt.Println("エラーじゃない")
+	} else if r.Method == http.MethodGet { // get
+		fmt.Println("login page")
+		tmpl := template.Must(template.ParseFiles("public/login.html"))
+		tmpl.Execute(w, nil)
+		//http.Handle("/login", http.StripPrefix("/public/", http.FileServer(http.Dir("public/login.html"))))
+		//http.FileServer(http.Dir("public/login.html"))
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed) // 405
+		w.Write([]byte("Method not allowed"))
 		http.Redirect(w, r, "/index", http.StatusFound)
-	default:
-		fmt.Fprint(w, "Method not allowed.\n")
 	}
 }
 
@@ -101,21 +115,21 @@ func staticHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		result, err := db.Query("select * from boards")
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
 		}
 		defer result.Close()
 
-		users := make([]User, 0)
+		boards := make([]Board, 0)
 		for result.Next() {
-			var user User
-			if err := result.Scan(&user.Id, &user.Name, &user.Email, &user.Message); err != nil {
-				log.Fatal(err)
+			var board Board
+			if err := result.Scan(&board.Id, &board.Name, &board.Email, &board.Message); err != nil {
+				log.Println(err)
 			}
-			users = append(users, user)
+			boards = append(boards, board)
 		}
 
 		tmpl := template.Must(template.ParseFiles("public/index.html"))
-		tmpl.Execute(w, users)
+		tmpl.Execute(w, boards)
 		log.Printf("%+v¥n", r)
 	case http.MethodPost:
 		method := r.PostFormValue("_method")
@@ -123,7 +137,7 @@ func staticHandler(w http.ResponseWriter, r *http.Request) {
 			id := r.PostFormValue("id")
 			delete, err := db.Prepare("delete from boards where id = ?")
 			if err != nil {
-				log.Fatal(err)
+				log.Println(err)
 			}
 			delete.Exec(id)
 		} else { //post
@@ -132,13 +146,14 @@ func staticHandler(w http.ResponseWriter, r *http.Request) {
 			message := r.FormValue("message")
 			insert, err := db.Prepare("insert into boards(name, email, message) values (?,?,?)")
 			if err != nil {
-				log.Fatal(err)
+				log.Println(err)
 			}
 			insert.Exec(name, email, message)
 		}
 
 		http.Redirect(w, r, "/index", http.StatusFound)
 	default:
-		fmt.Fprint(w, "Method not allowed.\n")
+		w.WriteHeader(http.StatusMethodNotAllowed) // 405
+		w.Write([]byte("Method not allowed"))
 	}
 }
