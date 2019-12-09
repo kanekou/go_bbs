@@ -19,7 +19,7 @@ type Board struct {
 
 type User struct {
 	Id       int
-	Name     string
+	Name     string // 現時点では機能的に不要、sessionを実装する場合に使用する
 	Email    string
 	Password string
 }
