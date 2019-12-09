@@ -1,6 +1,12 @@
 create table boards (
   id int not null primary key AUTO_INCREMENT, 
   name varchar(25) not null,
-  email varchar(35) not null,
   message varchar(25) not null
-); 
+);
+
+create table users (
+    id serial not null primary key,
+    name varchar(25) not null,
+    email varchar(35) not null,
+    password varchar(60) not null, unique(email);
+);
