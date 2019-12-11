@@ -1,14 +1,21 @@
 package main
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
+	"github.com/astaxie/beego/session"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"sync"
+	"time"
 )
 
 type Board struct {
@@ -24,24 +31,108 @@ type User struct {
 	Password string
 }
 
-func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Println("Error loading .env file")
-	}
-
-	http.HandleFunc("/login", loginHandler)
-	http.HandleFunc("/signup", signupHandler)
-	http.HandleFunc("/index", staticHandler)
-	s := &http.Server{
-		Addr: ":9000",
-	}
-
-	fmt.Println("server start port:8080")
-	s.ListenAndServe()
+//session manager
+type Manager struct {
+	cookieName  string
+	lock        sync.Mutex
+	provider    Provider
+	maxlifetime int64
 }
 
-func dbConnect() (db *sql.DB) {
+type Provider interface {
+	SessionInit(sid string) (Session, error)
+	SessionRead(sid string) (Session, error)
+	SessionDestroy(sid string) error
+	SessionGC(maxLifeTime int64)
+}
+
+type Session interface {
+	Set(key, value interface{}) error
+	Get(key interface{}) interface{}
+	Delete(key interface{}) error
+	SessionID() string
+}
+
+var globalSessions *session.Manager
+var provides = make(map[string]Provider)
+
+func NewManager(providerName, cookieName string, maxlifetime int64) (*Manager, error) {
+	provider, ok := provides[providerName]
+	if !ok {
+		return nil, fmt.Errorf("session: unknown provide %q (forgotten import?)", providerName)
+	}
+	return &Manager{provider: provider, cookieName: cookieName, maxlifetime: maxlifetime}, nil
+}
+
+func init() {
+	//sessionConfig := &session.ManagerConfig{CookieName: "gosessionid", Gclifetime: 3600}
+	//globalSessions, _ = session.NewManager("memory", sessionConfig)
+	globalSessions, _ = NewManager("memory", "gosessionid", 3600)
+	go globalSessions.GC()
+}
+
+func (manager *Manager) GC() {
+	manager.lock.Lock()
+	defer manager.lock.Unlock()
+	manager.provider.SessionGC(manager.maxlifetime)
+	time.AfterFunc(time.Duration(manager.maxlifetime), func() {
+		manager.GC()
+	})
+}
+
+func Register(name string, provider Provider) {
+	if provider == nil {
+		panic("session: Register provider is nil")
+	}
+	if _, dup := provides[name]; dup {
+		panic("session: Register called twice for provide" + name)
+	}
+	provides[name] = provider
+}
+
+//sessionIdがグローバルでユニークであることを保証
+func (manager *Manager) sessionId() string {
+	b := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		return ""
+	}
+	return base64.URLEncoding.EncodeToString(b)
+}
+
+//Sessionが現在アクセスしているユーザと既に関係しているか検査
+func (manager *Manager) SessionStart(w http.ResponseWriter, r *http.Request) (session Session) {
+	manager.lock.Lock()
+	defer manager.lock.Unlock()
+	cookie, err := r.Cookie(manager.cookieName)
+	if err != nil || cookie.Value == "" {
+		sid := manager.sessionId()
+		session, _ = manager.provider.SessionInit(sid)
+		cookie := http.Cookie{Name: manager.cookieName, Value: url.QueryEscape(sid),
+			Path: "/", HttpOnly: true, MaxAge: int(manager.maxlifetime)}
+		http.SetCookie(w, &cookie)
+	} else {
+		sid, _ := url.QueryUnescape(cookie.Value)
+		session, _ = manager.provider.SessionRead(sid)
+	}
+	return
+}
+
+func (manager *Manager) SessionDestroy(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(manager.cookieName)
+	if err != nil || cookie.Value == "" {
+		return
+	} else {
+		manager.lock.Lock()
+		defer manager.lock.Unlock()
+		manager.provider.SessionDestroy(cookie.Value)
+		expiration := time.Now()
+		cookie := http.Cookie{Name: manager.cookieName, Path: "/", HttpOnly: true,
+			Expires: expiration, MaxAge: -1}
+		http.SetCookie(w, &cookie)
+	}
+}
+
+func DbConnect() (db *sql.DB) {
 	db, err := sql.Open("mysql", "root:"+os.Getenv("DB_PASSWORD")+"@tcp(127.0.0.1:3306)/bbs")
 	if err != nil {
 		log.Println(err)
@@ -49,17 +140,24 @@ func dbConnect() (db *sql.DB) {
 	return db
 }
 
-func loginHandler(w http.ResponseWriter, r *http.Request) {
+func LoginHandler(w http.ResponseWriter, r *http.Request) {
+	sess, _ := globalSessions.SessionStart(w, r)
 	switch r.Method {
 	case http.MethodGet:
 		tmpl := template.Must(template.ParseFiles("public/login.html"))
-		tmpl.Execute(w, nil)
+		w.Header().Set("Content-Type", "text/html")
+		email := sess.Get("email")
+		fmt.Println(email)
+		tmpl.Execute(w, email)
 	case http.MethodPost:
 		var id string
 		email := r.FormValue("email")
 		pw := r.FormValue("password")
 
-		db := dbConnect()
+		fmt.Println("email:", r.Form["email"])
+		sess.Set("email", r.Form["email"])
+
+		db := DbConnect()
 		defer db.Close()
 		err := db.QueryRow("select id from users where email = ? and password = ?", email, pw).Scan(&id)
 		if err == sql.ErrNoRows { // Empty set
@@ -75,8 +173,8 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func signupHandler(w http.ResponseWriter, r *http.Request) {
-	db := dbConnect()
+func SignupHandler(w http.ResponseWriter, r *http.Request) {
+	db := DbConnect()
 	defer db.Close()
 
 	switch r.Method {
@@ -88,7 +186,7 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 		email := r.FormValue("email")
 		pw := r.FormValue("password")
 
-		db := dbConnect()
+		db := DbConnect()
 		defer db.Close()
 		insert, err := db.Prepare("insert into users(name, email, password) values (?,?,?)")
 		if err != nil {
@@ -104,8 +202,8 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func staticHandler(w http.ResponseWriter, r *http.Request) {
-	db := dbConnect()
+func StaticHandler(w http.ResponseWriter, r *http.Request) {
+	db := DbConnect()
 	defer db.Close()
 
 	switch r.Method {
@@ -152,4 +250,21 @@ func staticHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed) // 405
 		w.Write([]byte("Method not allowed"))
 	}
+}
+
+func main() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("Error loading .env file")
+	}
+
+	http.HandleFunc("/login", LoginHandler)
+	http.HandleFunc("/signup", SignupHandler)
+	http.HandleFunc("/index", StaticHandler)
+	s := &http.Server{
+		Addr: ":9000",
+	}
+
+	fmt.Println("server start port:8080")
+	s.ListenAndServe()
 }
