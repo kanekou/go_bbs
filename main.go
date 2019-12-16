@@ -1,11 +1,11 @@
 package main
 
 import (
+	"container/list"
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
 	"fmt"
-	"github.com/astaxie/beego/session"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
 	"html/template"
@@ -54,8 +54,10 @@ type Session interface {
 	SessionID() string
 }
 
-var globalSessions *session.Manager
+//var globalSessions *session.Manager
+var globalSessions *Manager
 var provides = make(map[string]Provider)
+var pder = &Providers{list: list.New()} //memory.goとの結合
 
 func NewManager(providerName, cookieName string, maxlifetime int64) (*Manager, error) {
 	provider, ok := provides[providerName]
@@ -66,9 +68,9 @@ func NewManager(providerName, cookieName string, maxlifetime int64) (*Manager, e
 }
 
 func init() {
-	sessionConfig := &session.ManagerConfig{CookieName: "gosessionid", Gclifetime: 3600}
-	globalSessions, _ = session.NewManager("memory", sessionConfig)
-	//globalSessions, _ = session.NewManager("memory", "gosessionid", 3600)
+	pder.sessions = make(map[string]*list.Element, 0)
+	Register("memory", pder)
+	globalSessions, _ = NewManager("memory", "gosessionid", 3600)
 	go globalSessions.GC()
 }
 
@@ -98,6 +100,45 @@ func (manager *Manager) sessionId() string {
 		return ""
 	}
 	return base64.URLEncoding.EncodeToString(b)
+}
+
+// memory.go
+type Providers struct {
+	lock     sync.Mutex
+	sessions map[string]*list.Element
+	list     *list.List
+}
+
+type SessionStore struct {
+	sid          string
+	timeAccessed time.Time
+	value        map[interface{}]interface{}
+}
+
+func (st *SessionStore) Set(key, value interface{}) error {
+	st.value[key] = value
+	pder.SessionUpdate(st.sid)
+	return nil
+}
+
+func (st *SessionStore) Get(key interface{}) interface{} {
+	pder.SessionUpdate(st.sid)
+	if v, ok := st.value[key]; ok {
+		return v
+	} else {
+		return nil
+	}
+	return nil
+}
+
+func (st *SessionStore) Delete(key interface{}) error {
+	delete(st.value, key)
+	pder.SessionUpdate(st.sid)
+	return nil
+}
+
+func (st *SessionStore) SessionID() string {
+	return st.sid
 }
 
 //Sessionが現在アクセスしているユーザと既に関係しているか検査
@@ -133,6 +174,64 @@ func (manager *Manager) SessionDestroy(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (pder *Providers) SessionInit(sid string) (Session, error) {
+	pder.lock.Lock()
+	defer pder.lock.Unlock()
+	v := make(map[interface{}]interface{}, 0)
+	newsess := &SessionStore{sid: sid, timeAccessed: time.Now(), value: v}
+	element := pder.list.PushBack(newsess)
+	pder.sessions[sid] = element
+	return newsess, nil
+}
+
+func (pder *Providers) SessionRead(sid string) (Session, error) {
+	if element, ok := pder.sessions[sid]; ok {
+		return element.Value.(*SessionStore), nil
+	} else {
+		sess, err := pder.SessionInit(sid)
+		return sess, err
+	}
+	return nil, nil
+}
+
+func (pder *Providers) SessionDestroy(sid string) error {
+	if element, ok := pder.sessions[sid]; ok {
+		delete(pder.sessions, sid)
+		pder.list.Remove(element)
+		return nil
+	}
+	return nil
+}
+
+func (pder *Providers) SessionGC(maxlifetime int64) {
+	pder.lock.Lock()
+	defer pder.lock.Unlock()
+
+	for {
+		element := pder.list.Back()
+		if element == nil {
+			break
+		}
+		if (element.Value.(*SessionStore).timeAccessed.Unix() + maxlifetime) < time.Now().Unix() {
+			pder.list.Remove(element)
+			delete(pder.sessions, element.Value.(*SessionStore).sid)
+		} else {
+			break
+		}
+	}
+}
+
+func (pder *Providers) SessionUpdate(sid string) error {
+	pder.lock.Lock()
+	defer pder.lock.Unlock()
+	if element, ok := pder.sessions[sid]; ok {
+		element.Value.(*SessionStore).timeAccessed = time.Now()
+		pder.list.MoveToFront(element)
+		return nil
+	}
+	return nil
+}
+
 func DbConnect() (db *sql.DB) {
 	db, err := sql.Open("mysql", "root:"+os.Getenv("DB_PASSWORD")+"@tcp(127.0.0.1:3306)/bbs")
 	if err != nil {
@@ -142,7 +241,8 @@ func DbConnect() (db *sql.DB) {
 }
 
 func LoginHandler(w http.ResponseWriter, r *http.Request) {
-	sess, _ := globalSessions.SessionStart(w, r)
+	//sess, _ := globalSessions.SessionStart(w, r)
+	sess := globalSessions.SessionStart(w, r)
 	switch r.Method {
 	case http.MethodGet:
 		tmpl := template.Must(template.ParseFiles("public/login.html"))

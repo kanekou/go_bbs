@@ -8,6 +8,13 @@ import (
 )
 
 var pder = &Provider{list: list.New()}
+var provides = make(map[string]Provider)
+
+type Provider struct {
+	lock     sync.Mutex
+	sessions map[string]*list.Element
+	list     *list.List
+}
 
 type SessionStore struct {
 	sid          string
@@ -39,12 +46,6 @@ func (st *SessionStore) Delete(key interface{}) error {
 
 func (st *SessionStore) SessionID() string {
 	return st.sid
-}
-
-type Provider struct {
-	lock     sync.Mutex
-	sessions map[string]*list.Element
-	list     *list.List
 }
 
 func (pder *Provider) SessionInit(sid string) (*SessionStore, error) {
