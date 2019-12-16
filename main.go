@@ -16,6 +16,7 @@ import (
 	"os"
 	"sync"
 	"time"
+	//"bbs/modules"
 )
 
 type Board struct {
@@ -65,9 +66,9 @@ func NewManager(providerName, cookieName string, maxlifetime int64) (*Manager, e
 }
 
 func init() {
-	//sessionConfig := &session.ManagerConfig{CookieName: "gosessionid", Gclifetime: 3600}
-	//globalSessions, _ = session.NewManager("memory", sessionConfig)
-	globalSessions, _ = NewManager("memory", "gosessionid", 3600)
+	sessionConfig := &session.ManagerConfig{CookieName: "gosessionid", Gclifetime: 3600}
+	globalSessions, _ = session.NewManager("memory", sessionConfig)
+	//globalSessions, _ = session.NewManager("memory", "gosessionid", 3600)
 	go globalSessions.GC()
 }
 
