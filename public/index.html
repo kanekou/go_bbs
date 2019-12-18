@@ -6,6 +6,10 @@
 </head>
 <body>
 <h1>掲示板</h1>
+{{/*<p>ようこそ!{{.Email}}さん</p>*/}}
+<form action="" method="post">
+    <input type="submit" name="logout" value="ログアウト">
+</form>
 <section>
     <h2>新規投稿</h2>
     <form action="" method="post">
@@ -18,8 +22,8 @@
     <h2>投稿一覧</h2>
     <hr>
     {{range .}}
-        <p>Name: {{.Name}}</p>
-        <p>Message: {{.Message}}</p>
+        <p>なまえ: {{.Name}}</p>
+        <p>{{.Message}}</p>
         <form action="" method="post">
             <input type="hidden" name="id" value={{.Id}}>
             <button type="submit" name="_method" value="DELETE">削除</button>
