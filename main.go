@@ -27,6 +27,7 @@ type User struct {
 
 var globalSessions *session.Manager
 var pder = &session.Providers{List: list.New()}
+var db *sql.DB
 
 func init() {
 	pder.Sessions = make(map[string]*list.Element, 0)
@@ -35,25 +36,14 @@ func init() {
 	go globalSessions.GC()
 }
 
-func DbConnect() (db *sql.DB) {
-	db, err := sql.Open("mysql", "root:"+os.Getenv("DB_PASSWORD")+"@tcp(127.0.0.1:3306)/bbs")
-	if err != nil {
-		log.Println(err)
-	}
-	return db
-}
-
 func LoginHandler(w http.ResponseWriter, r *http.Request) {
-	sess := globalSessions.SessionStart(w, r) //ここが原因, globalSessionがnil
-	db := DbConnect()
-	defer db.Close()
+	sess := globalSessions.SessionStart(w, r)
 
 	switch r.Method {
 	case http.MethodGet:
 		tmpl := template.Must(template.ParseFiles("public/login.html"))
 		w.Header().Set("Content-Type", "text/html")
 		email := sess.Get("email")
-
 		err := db.QueryRow("select email from users where email = ?", email).Scan(&email)
 		if err != sql.ErrNoRows { // Empty set
 			log.Println(err)
@@ -80,9 +70,6 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func SignupHandler(w http.ResponseWriter, r *http.Request) {
-	db := DbConnect()
-	defer db.Close()
-
 	switch r.Method {
 	case http.MethodGet:
 		sess := globalSessions.SessionStart(w, r)
@@ -99,8 +86,6 @@ func SignupHandler(w http.ResponseWriter, r *http.Request) {
 		email := r.FormValue("email")
 		pw := r.FormValue("password")
 
-		db := DbConnect()
-		defer db.Close()
 		insert, err := db.Prepare("insert into users(email, password) values (?,?)")
 		if err != nil {
 			log.Println(err)
@@ -116,8 +101,6 @@ func SignupHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
-	db := DbConnect()
-	defer db.Close()
 	sess := globalSessions.SessionStart(w, r)
 
 	switch r.Method {
@@ -128,7 +111,6 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println(err)
 			http.Redirect(w, r, "/login", http.StatusFound)
 		}
-
 		result, err := db.Query("select * from boards")
 		if err != nil {
 			log.Println(err)
@@ -183,6 +165,16 @@ func main() {
 	if err != nil {
 		log.Println("Error loading .env file")
 	}
+	db, err = sql.Open("mysql", "root:"+os.Getenv("DB_PASSWORD")+"@tcp(127.0.0.1:3306)/bbs")
+	if err != nil {
+		log.Println(err)
+	}
+	err = db.Ping()
+	if err != nil {
+		log.Println(err)
+	}
+	defer db.Close()
+
 	http.HandleFunc("/login", LoginHandler)
 	http.HandleFunc("/signup", SignupHandler)
 	http.HandleFunc("/index", IndexHandler)
