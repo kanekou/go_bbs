@@ -7,6 +7,7 @@ import (
 	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
 	"html/template"
 	"log"
 	"net/http"
@@ -52,15 +53,25 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 		tmpl.Execute(w, nil)
 	case http.MethodPost:
+		var hash string
 		email := r.FormValue("email")
 		pw := r.FormValue("password")
-		err := db.QueryRow("select id from users where email = ? and password = ?", email, pw).Scan(&email)
+		err := db.QueryRow("select password from users where email = ?", email).Scan(&hash)
 		if err == sql.ErrNoRows { // Empty set
 			log.Println(err)
+			log.Println("Login Failure")
 			http.Redirect(w, r, "/login", http.StatusFound)
 		} else {
-			sess.Set("email", r.Form["email"])
-			http.Redirect(w, r, "/index", http.StatusFound)
+			err = bcrypt.CompareHashAndPassword([]byte(hash), []byte(pw))
+			if err != nil {
+				log.Println(err)
+				log.Println("Login Failure")
+				http.Redirect(w, r, "/login", http.StatusFound)
+			} else {
+				log.Println("Login Success")
+				sess.Set("email", r.Form["email"])
+				http.Redirect(w, r, "/index", http.StatusFound)
+			}
 		}
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed) // 405
@@ -85,12 +96,16 @@ func SignupHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		email := r.FormValue("email")
 		pw := r.FormValue("password")
-
+		hash, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+		if err != nil {
+			log.Println(err)
+		}
+		hash_str := string(hash)
 		insert, err := db.Prepare("insert into users(email, password) values (?,?)")
 		if err != nil {
 			log.Println(err)
 		}
-		insert.Exec(email, pw)
+		insert.Exec(email, hash_str)
 
 		http.Redirect(w, r, "/index", http.StatusFound)
 	default:
