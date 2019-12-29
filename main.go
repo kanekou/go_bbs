@@ -101,13 +101,23 @@ func SignupHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println(err)
 		}
 		hash_str := string(hash)
-		insert, err := db.Prepare("insert into users(email, password) values (?,?)")
-		if err != nil {
-			log.Println(err)
-		}
-		insert.Exec(email, hash_str)
 
-		http.Redirect(w, r, "/index", http.StatusFound)
+		//emailの重複チェック
+		var userCnt int
+		err = db.QueryRow("select count(id) from users where email = ?", email).Scan(&userCnt)
+		if userCnt != 1 {
+			log.Println("無効なuserです")
+		} else if err != nil {
+			log.Println(err)
+		} else {
+			insert, err := db.Prepare("insert into users(email, password) values (?,?)")
+			if err != nil {
+				log.Println(err)
+			}
+			insert.Exec(email, hash_str)
+
+			http.Redirect(w, r, "/index", http.StatusFound)
+		}
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed) // 405
 		w.Write([]byte("Method not allowed"))
